@@ -13,20 +13,24 @@
       background: #f5f5f5;
       color: #333;
     }
+
     header {
       background: #1f4e79;
       color: white;
       padding: 1rem 1.5rem;
     }
+
     header h1 {
       margin: 0 0 0.5rem 0;
       font-size: 1.5rem;
     }
+
     header p {
       margin: 0;
       font-size: 0.9rem;
       opacity: 0.9;
     }
+
     .container {
       max-width: 1400px;
       margin: 1.5rem auto;
@@ -35,6 +39,7 @@
       border-radius: 8px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     }
+
     .controls {
       display: flex;
       flex-wrap: wrap;
@@ -43,10 +48,12 @@
       padding: 1rem 1rem 0.5rem;
       border-bottom: 1px solid #ddd;
     }
+
     .controls label {
       font-size: 0.9rem;
       font-weight: 600;
     }
+
     .controls input[type="text"] {
       flex: 1;
       min-width: 250px;
@@ -55,22 +62,26 @@
       border: 1px solid #ccc;
       font-size: 0.95rem;
     }
+
     .summary {
       font-size: 0.85rem;
       color: #666;
     }
+
     table {
       width: 100%;
       border-collapse: collapse;
       margin-top: 0.5rem;
       font-size: 0.85rem;
     }
+
     thead {
       position: sticky;
       top: 0;
       z-index: 1;
       background: #e9f0f8;
     }
+
     th, td {
       padding: 0.4rem 0.5rem;
       border-bottom: 1px solid #eee;
@@ -78,15 +89,25 @@
       vertical-align: top;
       white-space: nowrap;
     }
+
     th {
       font-weight: 600;
       border-bottom: 2px solid #d4dbe7;
     }
+
+    /* Allow some columns to wrap if long */
     td:nth-child(1),
     td:nth-child(8),
     td:nth-child(9) {
       white-space: normal;
     }
+
+    /* Right-align numeric money columns */
+    td:nth-child(6),
+    td:nth-child(7) {
+      text-align: right;
+    }
+
     .pagination {
       display: flex;
       justify-content: space-between;
@@ -96,6 +117,7 @@
       gap: 0.75rem;
       flex-wrap: wrap;
     }
+
     .pagination button {
       border: 1px solid #ccc;
       background: #fafafa;
@@ -104,24 +126,29 @@
       cursor: pointer;
       font-size: 0.85rem;
     }
+
     .pagination button:disabled {
       opacity: 0.5;
       cursor: default;
     }
+
     .pagination-info {
       color: #555;
     }
+
     .loading,
     .error {
       padding: 1rem;
       font-size: 0.9rem;
     }
+
     .error {
       color: #a00;
       background: #ffecec;
       border-radius: 4px;
       margin: 1rem;
     }
+
     @media (max-width: 768px) {
       th, td {
         font-size: 0.8rem;
@@ -140,11 +167,11 @@
 
   <div class="container">
     <div class="controls">
-      <label for="searchInput">Filter items:</label>
+      <label for="searchInput">Filter Bid Item:</label>
       <input
         id="searchInput"
         type="text"
-        placeholder="Type to filter across all columns (e.g. item text, project name, contractor)..."
+        placeholder="Type to filter by Bid Item only..."
       />
       <span class="summary" id="resultsCount"></span>
     </div>
@@ -187,6 +214,50 @@
     let allData = [];
     let filteredData = [];
     let currentPage = 1;
+
+    // Format currency like $12,345.67
+    function formatCurrency(value) {
+      if (value === null || value === undefined || value === "" || isNaN(value)) {
+        return "";
+      }
+      return "$" + Number(value).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
+    // Format date as MM/DD/YYYY, handling epoch ms / seconds / ISO strings
+    function formatDate(value) {
+      if (value === null || value === undefined || value === "") return "";
+
+      let d;
+
+      if (typeof value === "number") {
+        // Assume epoch ms
+        d = new Date(value);
+      } else {
+        const s = String(value).trim();
+
+        // If it's all digits and length 10–13, treat as epoch seconds/ms
+        if (/^\d{10,13}$/.test(s)) {
+          const num = Number(s);
+          d = s.length === 10 ? new Date(num * 1000) : new Date(num);
+        } else {
+          // Fallback: let Date parse it (ISO, etc.)
+          d = new Date(s);
+        }
+      }
+
+      if (isNaN(d.getTime())) {
+        // If parsing fails, just return the original value
+        return String(value);
+      }
+
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      const yyyy = d.getFullYear();
+      return mm + "/" + dd + "/" + yyyy;
+    }
 
     document.addEventListener("DOMContentLoaded", () => {
       const searchInput = document.getElementById("searchInput");
@@ -234,6 +305,7 @@
         });
     }
 
+    // Filter ONLY by "Bid Item" column
     function handleSearchInput(event) {
       const term = event.target.value.trim().toLowerCase();
       currentPage = 1;
@@ -242,10 +314,9 @@
         filteredData = allData;
       } else {
         filteredData = allData.filter(row => {
-          return Object.values(row).some(value => {
-            if (value === null || value === undefined) return false;
-            return String(value).toLowerCase().includes(term);
-          });
+          const value = row["Bid Item"]; // must match column header
+          if (value === null || value === undefined) return false;
+          return String(value).toLowerCase().includes(term);
         });
       }
 
@@ -289,11 +360,14 @@
             value = "";
           }
 
-          if (colName === "Bid Open Date" && typeof value === "string" && value.includes("T")) {
-            value = value.split("T")[0];
+          if (colName === "Bid Open Date") {
+            td.textContent = formatDate(value);
+          } else if (colName === "Unit Price" || colName === "Bid Price") {
+            td.textContent = formatCurrency(value);
+          } else {
+            td.textContent = value;
           }
 
-          td.textContent = value;
           tr.appendChild(td);
         });
 
@@ -315,7 +389,9 @@
       const totalItems = filteredData.length;
       const totalPages = Math.max(1, Math.ceil(totalItems / ROWS_PER_PAGE));
 
-      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage > totalPages) {
+        currentPage = totalPages;
+      }
 
       const prevBtn = document.getElementById("prevPage");
       const nextBtn = document.getElementById("nextPage");
@@ -330,7 +406,9 @@
     function changePage(delta) {
       const totalPages = Math.max(1, Math.ceil(filteredData.length / ROWS_PER_PAGE));
       const newPage = currentPage + delta;
+
       if (newPage < 1 || newPage > totalPages) return;
+
       currentPage = newPage;
       renderTable();
       renderPagination();
