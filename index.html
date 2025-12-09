@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Bid Pricing History</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+      color: #333;
+    }
+    header {
+      background: #1f4e79;
+      color: white;
+      padding: 1rem 1.5rem;
+    }
+    header h1 {
+      margin: 0 0 0.5rem 0;
+      font-size: 1.5rem;
+    }
+    header p {
+      margin: 0;
+      font-size: 0.9rem;
+      opacity: 0.9;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 1.5rem auto;
+      padding: 0 1rem 2rem;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 1rem 1rem 0.5rem;
+      border-bottom: 1px solid #ddd;
+    }
+    .controls label {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .controls input[type="text"] {
+      flex: 1;
+      min-width: 250px;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 0.95rem;
+    }
+    .summary {
+      font-size: 0.85rem;
+      color: #666;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+    }
+    thead {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #e9f0f8;
+    }
+    th, td {
+      padding: 0.4rem 0.5rem;
+      border-bottom: 1px solid #eee;
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    th {
+      font-weight: 600;
+      border-bottom: 2px solid #d4dbe7;
+    }
+    td:nth-child(1),
+    td:nth-child(8),
+    td:nth-child(9) {
+      white-space: normal;
+    }
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem 1rem;
+      font-size: 0.85rem;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .pagination button {
+      border: 1px solid #ccc;
+      background: #fafafa;
+      padding: 0.3rem 0.7rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .pagination button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .pagination-info {
+      color: #555;
+    }
+    .loading,
+    .error {
+      padding: 1rem;
+      font-size: 0.9rem;
+    }
+    .error {
+      color: #a00;
+      background: #ffecec;
+      border-radius: 4px;
+      margin: 1rem;
+    }
+    @media (max-width: 768px) {
+      th, td {
+        font-size: 0.8rem;
+      }
+      header h1 {
+        font-size: 1.2rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Bid Pricing History</h1>
+    <p>Live filter &amp; paging for bid items (client-side only).</p>
+  </header>
+
+  <div class="container">
+    <div class="controls">
+      <label for="searchInput">Filter items:</label>
+      <input
+        id="searchInput"
+        type="text"
+        placeholder="Type to filter across all columns (e.g. item text, project name, contractor)..."
+      />
+      <span class="summary" id="resultsCount"></span>
+    </div>
+
+    <div id="tableWrapper">
+      <div class="loading" id="loadingMessage">Loading data...</div>
+      <div class="error" id="errorMessage" style="display:none;"></div>
+
+      <table id="bidTable" style="display:none;">
+        <thead>
+          <tr>
+            <th>Bid Item</th>
+            <th>Quantity</th>
+            <th>Unit</th>
+            <th>Contractor</th>
+            <th>Low Bidder</th>
+            <th>Unit Price</th>
+            <th>Bid Price</th>
+            <th>Project Number</th>
+            <th>Project Name</th>
+            <th>Bid Open Date</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <div class="pagination" id="pagination" style="display:none;">
+        <div>
+          <button id="prevPage">Previous</button>
+          <button id="nextPage">Next</button>
+        </div>
+        <div class="pagination-info" id="pageInfo"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const ROWS_PER_PAGE = 500;
+
+    let allData = [];
+    let filteredData = [];
+    let currentPage = 1;
+
+    document.addEventListener("DOMContentLoaded", () => {
+      const searchInput = document.getElementById("searchInput");
+      searchInput.addEventListener("input", handleSearchInput);
+
+      document.getElementById("prevPage").addEventListener("click", () => changePage(-1));
+      document.getElementById("nextPage").addEventListener("click", () => changePage(1));
+
+      loadData();
+    });
+
+    function loadData() {
+      const loading = document.getElementById("loadingMessage");
+      const error = document.getElementById("errorMessage");
+      const table = document.getElementById("bidTable");
+      const pagination = document.getElementById("pagination");
+
+      loading.style.display = "block";
+      error.style.display = "none";
+      table.style.display = "none";
+      pagination.style.display = "none";
+
+      fetch("bid_data.json")
+        .then(response => {
+          if (!response.ok) {
+            throw new Error("Could not load bid_data.json. Make sure it is in the same folder as index.html.");
+          }
+          return response.json();
+        })
+        .then(data => {
+          allData = data;
+          filteredData = allData;
+          currentPage = 1;
+          loading.style.display = "none";
+          table.style.display = "table";
+          pagination.style.display = "flex";
+          renderTable();
+          renderPagination();
+        })
+        .catch(err => {
+          console.error(err);
+          loading.style.display = "none";
+          error.textContent = err.message;
+          error.style.display = "block";
+        });
+    }
+
+    function handleSearchInput(event) {
+      const term = event.target.value.trim().toLowerCase();
+      currentPage = 1;
+
+      if (!term) {
+        filteredData = allData;
+      } else {
+        filteredData = allData.filter(row => {
+          return Object.values(row).some(value => {
+            if (value === null || value === undefined) return false;
+            return String(value).toLowerCase().includes(term);
+          });
+        });
+      }
+
+      renderTable();
+      renderPagination();
+    }
+
+    function getPageData() {
+      const startIndex = (currentPage - 1) * ROWS_PER_PAGE;
+      const endIndex = startIndex + ROWS_PER_PAGE;
+      return filteredData.slice(startIndex, endIndex);
+    }
+
+    function renderTable() {
+      const tbody = document.querySelector("#bidTable tbody");
+      tbody.innerHTML = "";
+
+      const pageData = getPageData();
+
+      pageData.forEach(row => {
+        const tr = document.createElement("tr");
+
+        const columns = [
+          "Bid Item",
+          "Quantity",
+          "Unit",
+          "Contractor",
+          "Low Bidder",
+          "Unit Price",
+          "Bid Price",
+          "Project Number",
+          "Project Name",
+          "Bid Open Date"
+        ];
+
+        columns.forEach(colName => {
+          const td = document.createElement("td");
+          let value = row[colName];
+
+          if (value === null || value === undefined || Number.isNaN(value)) {
+            value = "";
+          }
+
+          if (colName === "Bid Open Date" && typeof value === "string" && value.includes("T")) {
+            value = value.split("T")[0];
+          }
+
+          td.textContent = value;
+          tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+      });
+
+      const countEl = document.getElementById("resultsCount");
+      const total = filteredData.length;
+      const onPage = pageData.length;
+
+      if (total === 0) {
+        countEl.textContent = "No results match your filter.";
+      } else {
+        countEl.textContent = `${total.toLocaleString()} items (showing ${onPage.toLocaleString()} on this page)`;
+      }
+    }
+
+    function renderPagination() {
+      const totalItems = filteredData.length;
+      const totalPages = Math.max(1, Math.ceil(totalItems / ROWS_PER_PAGE));
+
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      const prevBtn = document.getElementById("prevPage");
+      const nextBtn = document.getElementById("nextPage");
+      const pageInfo = document.getElementById("pageInfo");
+
+      prevBtn.disabled = currentPage === 1;
+      nextBtn.disabled = currentPage === totalPages || totalItems === 0;
+
+      pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${ROWS_PER_PAGE} items per page)`;
+    }
+
+    function changePage(delta) {
+      const totalPages = Math.max(1, Math.ceil(filteredData.length / ROWS_PER_PAGE));
+      const newPage = currentPage + delta;
+      if (newPage < 1 || newPage > totalPages) return;
+      currentPage = newPage;
+      renderTable();
+      renderPagination();
+    }
+  </script>
+</body>
+</html>
